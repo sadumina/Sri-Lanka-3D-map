@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
   Aperture,
   CloudRain,
+  Droplets,
+  Home,
   Layers,
   MapPinned,
   Mountain,
@@ -14,9 +17,11 @@ import {
   Radar,
   SunMoon,
   Waves,
+  X,
 } from "lucide-react";
-import { districtLabels, floodHazards, landslideHazards } from "../lib/hazardData";
+import { districtLabels, floodHazards, landslideHazards, riverPaths } from "../lib/hazardData";
 import type { HazardCollection, HazardProperties, RiskLevel } from "../lib/hazardTypes";
+import { districtRisk } from "../lib/decisionSupportData";
 
 type CesiumModule = typeof import("cesium");
 type Viewer = import("cesium").Viewer;
@@ -31,6 +36,14 @@ type LayerState = {
   terrain: boolean;
   labels: boolean;
   pulses: boolean;
+  rivers: boolean;
+};
+
+const riskWeight: Record<RiskLevel, number> = {
+  low: 0.7,
+  medium: 0.95,
+  high: 1.2,
+  extreme: 1.45,
 };
 
 const riskColors: Record<RiskLevel, string> = {
@@ -86,21 +99,21 @@ const tourStops = [
     orientation: { heading: 0, pitch: -70, roll: 0 },
   },
   {
-    title: "Central Highlands",
-    subtitle: "Cinematic focus on landslide-prone research zones.",
-    destination: { lon: 80.76, lat: 7.08, height: 185000 },
+    title: "Nuwara Eliya Highlands",
+    subtitle: "Landslide-prone DS divisions: Kothmale, Ambagamuwa, and Walapane.",
+    destination: { lon: 80.68, lat: 6.97, height: 145000 },
     orientation: { heading: 22, pitch: -52, roll: 0 },
   },
   {
-    title: "Western Flood Corridor",
-    subtitle: "Urban and river-basin flood exposure around Colombo and Kalutara.",
-    destination: { lon: 79.98, lat: 6.82, height: 170000 },
+    title: "Kelani River Corridor",
+    subtitle: "Flood exposure from Colombo through Gampaha to the Kegalle foothills.",
+    destination: { lon: 80.08, lat: 6.94, height: 175000 },
     orientation: { heading: 18, pitch: -48, roll: 0 },
   },
   {
-    title: "Eastern Lowlands",
-    subtitle: "Coastal and lagoon-connected flood probability zones.",
-    destination: { lon: 81.48, lat: 7.78, height: 230000 },
+    title: "Kalu River Corridor",
+    subtitle: "Flood exposure from Kalutara upstream to Ratnapura, Sri Lanka's classic flood city.",
+    destination: { lon: 80.2, lat: 6.63, height: 180000 },
     orientation: { heading: 335, pitch: -51, roll: 0 },
   },
 ];
@@ -140,6 +153,45 @@ function createBoundarySource(Cesium: CesiumModule) {
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
+  });
+
+  return source;
+}
+
+function createRiverSource(Cesium: CesiumModule) {
+  const source = new Cesium.CustomDataSource("Rivers");
+
+  riverPaths.forEach(({ name, positions }) => {
+    const points = positions.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, 900));
+    const [midLon, midLat] = positions[Math.floor(positions.length / 2)];
+
+    source.entities.add({
+      name: `${name} River`,
+      polyline: {
+        positions: points,
+        width: 5,
+        material: new Cesium.PolylineGlowMaterialProperty({
+          glowPower: 0.28,
+          taperPower: 0.55,
+          color: Cesium.Color.fromCssColorString(hazardAccent.flood),
+        }),
+        clampToGround: false,
+      },
+    });
+
+    source.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(midLon, midLat, 1200),
+      label: {
+        text: `${name} River`,
+        font: "700 13px Inter, sans-serif",
+        fillColor: Cesium.Color.fromCssColorString("#bff1ff"),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.85),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -14),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
   });
 
   return source;
@@ -185,12 +237,6 @@ function createPulseSource(Cesium: CesiumModule) {
     const properties = feature.properties;
     const center = polygonCenter(feature);
     const color = Cesium.Color.fromCssColorString(hazardAccent[properties.hazardType]);
-    const riskWeight: Record<RiskLevel, number> = {
-      low: 0.7,
-      medium: 0.95,
-      high: 1.2,
-      extreme: 1.45,
-    };
     const size = 5500 * riskWeight[properties.riskLevel];
     const phase = index * 0.34;
 
@@ -223,7 +269,7 @@ function createPulseSource(Cesium: CesiumModule) {
       label:
         properties.riskLevel === "extreme"
           ? {
-              text: `${properties.district} ${properties.hazardType}`,
+              text: `${properties.locality ?? properties.district} ${properties.hazardType}`,
               font: "800 13px Inter, sans-serif",
               fillColor: Cesium.Color.WHITE,
               outlineColor: Cesium.Color.BLACK.withAlpha(0.9),
@@ -233,9 +279,9 @@ function createPulseSource(Cesium: CesiumModule) {
               disableDepthTestDistance: Number.POSITIVE_INFINITY,
             }
           : undefined,
-      description: `${properties.district}: ${properties.riskLevel} ${properties.hazardType} risk, ${Math.round(
-        properties.confidence * 100,
-      )}% confidence`,
+      description: `${properties.locality ?? properties.district}: ${properties.riskLevel} ${
+        properties.hazardType
+      } risk, ${Math.round(properties.confidence * 100)}% confidence`,
     });
   });
 
@@ -266,6 +312,7 @@ export default function SriLankaHazardMap() {
     labels?: CustomDataSource;
     pulses?: CustomDataSource;
     boundary?: CustomDataSource;
+    rivers?: CustomDataSource;
   }>({});
   const terrainProviderRef = useRef<TerrainProvider | null>(null);
   const googleTilesetRef = useRef<Cesium3DTileset | null>(null);
@@ -278,11 +325,22 @@ export default function SriLankaHazardMap() {
     terrain: true,
     labels: true,
     pulses: true,
+    rivers: true,
   });
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [tourIndex, setTourIndex] = useState(0);
   const [tourActive, setTourActive] = useState(false);
   const [status, setStatus] = useState("Loading terrain");
+  const [selected, setSelected] = useState<HazardProperties | null>(null);
+
+  useEffect(() => {
+    document.documentElement.classList.add("no-scroll");
+    document.body.classList.add("no-scroll");
+    return () => {
+      document.documentElement.classList.remove("no-scroll");
+      document.body.classList.remove("no-scroll");
+    };
+  }, []);
 
   const metrics = useMemo(
     () => ({
@@ -362,7 +420,7 @@ export default function SriLankaHazardMap() {
         fullscreenButton: false,
         geocoder: false,
         homeButton: false,
-        infoBox: true,
+        infoBox: false,
         navigationHelpButton: false,
         sceneModePicker: false,
         selectionIndicator: true,
@@ -445,6 +503,10 @@ export default function SriLankaHazardMap() {
       viewer.dataSources.add(boundary);
       sourcesRef.current.boundary = boundary;
 
+      const rivers = createRiverSource(Cesium);
+      viewer.dataSources.add(rivers);
+      sourcesRef.current.rivers = rivers;
+
       const pulses = createPulseSource(Cesium);
       viewer.dataSources.add(pulses);
       sourcesRef.current.pulses = pulses;
@@ -479,6 +541,13 @@ export default function SriLankaHazardMap() {
       viewer.dataSources.add(labels);
       sourcesRef.current.labels = labels;
 
+      viewer.selectedEntityChanged.addEventListener((entity) => {
+        const properties = entity?.properties?.getValue(Cesium.JulianDate.now()) as
+          | HazardProperties
+          | undefined;
+        setSelected(properties ?? null);
+      });
+
       flyToStop(0, 2.6);
       viewer.camera.changed.addEventListener(enforceSriLankaView);
       if (!google3dKey) {
@@ -506,6 +575,7 @@ export default function SriLankaHazardMap() {
     if (sourcesRef.current.landslide) sourcesRef.current.landslide.show = layers.landslide;
     if (sourcesRef.current.labels) sourcesRef.current.labels.show = layers.labels;
     if (sourcesRef.current.pulses) sourcesRef.current.pulses.show = layers.pulses;
+    if (sourcesRef.current.rivers) sourcesRef.current.rivers.show = layers.rivers;
     if (googleTilesetRef.current) googleTilesetRef.current.show = layers.google3d;
 
     const Cesium = cesiumRef.current;
@@ -559,8 +629,9 @@ export default function SriLankaHazardMap() {
         </div>
         <div className="control-stack">
           {[
-            ["flood", "Flood Risk", "Lowland and coastal probability zones", Waves],
-            ["landslide", "Landslide Risk", "Central highland slope-risk zones", Mountain],
+            ["flood", "Flood Risk", "Kelani & Kalu river corridor zones", Waves],
+            ["landslide", "Landslide Risk", "Nuwara Eliya DS-division slope risk", Mountain],
+            ["rivers", "Rivers", "Kelani & Kalu river paths", Droplets],
             ["pulses", "Risk Signals", "Animated cinematic hotspot beacons", Radar],
             ["labels", "District Labels", "Presentation callout markers", Activity],
             ["google3d", "3D Detail", "Photorealistic detail when API access is available", Aperture],
@@ -609,18 +680,24 @@ export default function SriLankaHazardMap() {
               <p className="eyebrow">Sri Lanka Only</p>
               <h1>Flood & Landslide Prediction Map</h1>
             </div>
-            <button
-              className="icon-button"
-              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-              aria-label="Switch theme"
-              title="Switch theme"
-            >
-              <SunMoon size={20} />
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Link href="/" className="icon-button" aria-label="Back to home" title="Back to home">
+                <Home size={20} />
+              </Link>
+              <button
+                className="icon-button"
+                onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+                aria-label="Switch theme"
+                title="Switch theme"
+              >
+                <SunMoon size={20} />
+              </button>
+            </div>
           </div>
           <p className="panel-copy">
-            A focused 3D national showcase for predicted flood and landslide zones. The camera stays
-            locked to Sri Lanka so the presentation feels clean, clear, and research-ready.
+            A focused case-study showcase: landslide risk mapped only across Nuwara Eliya&apos;s
+            highest-risk DS divisions (Kothmale, Ambagamuwa, Walapane), and flood risk mapped along
+            the Kelani and Kalu river corridors.
           </p>
 
           <div className="metric-grid">
@@ -646,14 +723,14 @@ export default function SriLankaHazardMap() {
               <div className="metric-row">
                 <MapPinned size={15} aria-hidden /> Focus
               </div>
-              <strong>Islandwide</strong>
+              <strong>Highlands + 2 Rivers</strong>
             </div>
           </div>
 
           <div className="showcase-strip">
             <div>
               <Aperture size={16} aria-hidden />
-              National focus mode
+              Nuwara Eliya · Kelani · Kalu
             </div>
             <strong>3D showcase</strong>
           </div>
@@ -722,6 +799,36 @@ export default function SriLankaHazardMap() {
         </div>
         {Controls}
       </section>
+
+      {selected ? (
+        <aside className={`detail-panel risk-${selected.riskLevel}`} aria-label="Hazard zone detail">
+          <button className="detail-panel-close" onClick={() => setSelected(null)} aria-label="Close detail panel">
+            <X size={16} />
+          </button>
+          <p className="eyebrow">
+            {selected.hazardType === "flood" ? "Flood zone" : "Landslide zone"} · {selected.district} District
+          </p>
+          <h2>{selected.locality ?? selected.district}</h2>
+          <div className="detail-panel-row">
+            <span>Risk level</span>
+            <strong className={`risk-pill risk-${selected.riskLevel}`}>{selected.riskLevel.toUpperCase()}</strong>
+          </div>
+          <div className="detail-panel-row">
+            <span>Model confidence</span>
+            <strong>{Math.round(selected.confidence * 100)}%</strong>
+          </div>
+          <div className="detail-panel-action">
+            <p className="detail-panel-action-label">Recommended action</p>
+            <p>
+              {districtRisk.find((entry) => entry.district === selected.district)?.recommendedAction ??
+                "Monitor conditions; no active alert."}
+            </p>
+          </div>
+          <Link href="/dashboard" className="detail-panel-link">
+            Open full decision support view
+          </Link>
+        </aside>
+      ) : null}
     </main>
   );
 }

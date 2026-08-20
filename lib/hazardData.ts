@@ -14,14 +14,18 @@ function ellipsePolygon(
   centerLat: number,
   radiusLon: number,
   radiusLat: number,
+  rotationDeg = 0,
   points = 34,
 ): GeoJSON.Position[] {
+  const rotation = (rotationDeg * Math.PI) / 180;
   const coordinates: GeoJSON.Position[] = [];
   for (let index = 0; index < points; index += 1) {
     const angle = (Math.PI * 2 * index) / points;
+    const x = Math.cos(angle) * radiusLon;
+    const y = Math.sin(angle) * radiusLat;
     coordinates.push([
-      Number((centerLon + Math.cos(angle) * radiusLon).toFixed(5)),
-      Number((centerLat + Math.sin(angle) * radiusLat).toFixed(5)),
+      Number((centerLon + x * Math.cos(rotation) - y * Math.sin(rotation)).toFixed(5)),
+      Number((centerLat + x * Math.sin(rotation) + y * Math.cos(rotation)).toFixed(5)),
     ]);
   }
   coordinates.push(coordinates[0]);
@@ -34,6 +38,7 @@ function feature(
   centerLat: number,
   radiusLon: number,
   radiusLat: number,
+  rotationDeg = 0,
 ): HazardFeature {
   return {
     type: "Feature",
@@ -44,47 +49,142 @@ function feature(
     },
     geometry: {
       type: "Polygon",
-      coordinates: [ellipsePolygon(centerLon, centerLat, radiusLon, radiusLat)],
+      coordinates: [ellipsePolygon(centerLon, centerLat, radiusLon, radiusLat, rotationDeg)],
     },
   };
 }
 
+// Kelani River, mouth (Colombo) -> upper catchment (Kitulgala, Kegalle district).
+const kelaniRiverPath: GeoJSON.Position[] = [
+  [79.87, 6.96],
+  [79.93, 6.97],
+  [80.06, 6.95],
+  [80.14, 6.9],
+  [80.28, 6.94],
+  [80.42, 6.99],
+];
+
+// Kalu River, mouth (Kalutara) -> upper catchment (Kalawana, Ratnapura district).
+const kaluRiverPath: GeoJSON.Position[] = [
+  [79.96, 6.58],
+  [80.1, 6.58],
+  [80.24, 6.62],
+  [80.4, 6.68],
+  [80.46, 6.6],
+];
+
+export const riverPaths: { name: "Kelani" | "Kalu"; positions: GeoJSON.Position[] }[] = [
+  { name: "Kelani", positions: kelaniRiverPath },
+  { name: "Kalu", positions: kaluRiverPath },
+];
+
 export const floodHazards: HazardCollection = {
   type: "FeatureCollection",
   features: [
-    feature({ hazardType: "flood", riskLevel: "extreme", district: "Colombo" }, 79.9, 6.9, 0.18, 0.12),
-    feature({ hazardType: "flood", riskLevel: "high", district: "Gampaha" }, 80.02, 7.08, 0.21, 0.14),
-    feature({ hazardType: "flood", riskLevel: "high", district: "Kalutara" }, 80.05, 6.58, 0.22, 0.13),
-    feature({ hazardType: "flood", riskLevel: "medium", district: "Galle" }, 80.22, 6.08, 0.2, 0.1),
-    feature({ hazardType: "flood", riskLevel: "medium", district: "Matara" }, 80.55, 5.96, 0.22, 0.1),
-    feature({ hazardType: "flood", riskLevel: "high", district: "Trincomalee" }, 81.18, 8.58, 0.25, 0.18),
-    feature({ hazardType: "flood", riskLevel: "medium", district: "Batticaloa" }, 81.55, 7.72, 0.2, 0.26),
-    feature({ hazardType: "flood", riskLevel: "high", district: "Ampara" }, 81.68, 7.22, 0.22, 0.2),
-    feature({ hazardType: "flood", riskLevel: "medium", district: "Mannar" }, 80.02, 8.92, 0.24, 0.16),
-    feature({ hazardType: "flood", riskLevel: "low", district: "Anuradhapura" }, 80.45, 8.28, 0.23, 0.16),
+    // Kelani River corridor
+    feature(
+      { hazardType: "flood", riskLevel: "extreme", district: "Colombo", locality: "Kelani River Mouth – Colombo", river: "Kelani" },
+      79.88,
+      6.95,
+      0.14,
+      0.07,
+      20,
+    ),
+    feature(
+      { hazardType: "flood", riskLevel: "high", district: "Gampaha", locality: "Biyagama – Kelani Valley", river: "Kelani" },
+      80.02,
+      6.95,
+      0.13,
+      0.06,
+      10,
+    ),
+    feature(
+      { hazardType: "flood", riskLevel: "high", district: "Colombo", locality: "Hanwella – Kelani River", river: "Kelani" },
+      80.14,
+      6.9,
+      0.12,
+      0.06,
+      -15,
+    ),
+    feature(
+      { hazardType: "flood", riskLevel: "medium", district: "Kegalle", locality: "Kitulgala – Upper Kelani", river: "Kelani" },
+      80.4,
+      6.99,
+      0.13,
+      0.07,
+      35,
+    ),
+    // Kalu River corridor
+    feature(
+      { hazardType: "flood", riskLevel: "extreme", district: "Kalutara", locality: "Kalu River Mouth – Kalutara", river: "Kalu" },
+      79.98,
+      6.58,
+      0.14,
+      0.07,
+      5,
+    ),
+    feature(
+      { hazardType: "flood", riskLevel: "high", district: "Kalutara", locality: "Horana – Kalu River", river: "Kalu" },
+      80.1,
+      6.58,
+      0.12,
+      0.06,
+      15,
+    ),
+    feature(
+      { hazardType: "flood", riskLevel: "extreme", district: "Ratnapura", locality: "Ratnapura Town – Kalu River", river: "Kalu" },
+      80.4,
+      6.68,
+      0.14,
+      0.08,
+      -25,
+    ),
+    feature(
+      { hazardType: "flood", riskLevel: "medium", district: "Ratnapura", locality: "Kalawana – Upper Kalu", river: "Kalu" },
+      80.46,
+      6.6,
+      0.12,
+      0.07,
+      -40,
+    ),
   ],
 };
 
 export const landslideHazards: HazardCollection = {
   type: "FeatureCollection",
   features: [
-    feature({ hazardType: "landslide", riskLevel: "extreme", district: "Nuwara Eliya" }, 80.78, 6.96, 0.18, 0.16),
-    feature({ hazardType: "landslide", riskLevel: "extreme", district: "Badulla" }, 81.02, 6.82, 0.18, 0.14),
-    feature({ hazardType: "landslide", riskLevel: "high", district: "Kandy" }, 80.64, 7.3, 0.18, 0.14),
-    feature({ hazardType: "landslide", riskLevel: "high", district: "Ratnapura" }, 80.42, 6.7, 0.2, 0.16),
-    feature({ hazardType: "landslide", riskLevel: "high", district: "Kegalle" }, 80.34, 7.24, 0.16, 0.12),
-    feature({ hazardType: "landslide", riskLevel: "medium", district: "Matale" }, 80.68, 7.56, 0.17, 0.15),
-    feature({ hazardType: "landslide", riskLevel: "medium", district: "Monaragala" }, 81.22, 6.88, 0.18, 0.13),
-    feature({ hazardType: "landslide", riskLevel: "medium", district: "Kalutara" }, 80.22, 6.62, 0.16, 0.1),
-    feature({ hazardType: "landslide", riskLevel: "low", district: "Galle" }, 80.32, 6.22, 0.15, 0.09),
+    feature(
+      { hazardType: "landslide", riskLevel: "high", district: "Nuwara Eliya", locality: "Kothmale" },
+      80.6,
+      7.05,
+      0.09,
+      0.06,
+      35,
+    ),
+    feature(
+      { hazardType: "landslide", riskLevel: "extreme", district: "Nuwara Eliya", locality: "Ambagamuwa" },
+      80.58,
+      6.9,
+      0.08,
+      0.07,
+      -20,
+    ),
+    feature(
+      { hazardType: "landslide", riskLevel: "medium", district: "Nuwara Eliya", locality: "Walapane" },
+      80.85,
+      6.95,
+      0.07,
+      0.08,
+      10,
+    ),
   ],
 };
 
 export const districtLabels = [
-  { name: "Colombo", lon: 79.86, lat: 6.93, note: "Urban flood exposure" },
-  { name: "Kandy", lon: 80.64, lat: 7.29, note: "Highland instability" },
-  { name: "Nuwara Eliya", lon: 80.77, lat: 6.97, note: "Extreme slope signal" },
-  { name: "Ratnapura", lon: 80.4, lat: 6.68, note: "Rainfall-linked risk" },
-  { name: "Batticaloa", lon: 81.7, lat: 7.72, note: "Coastal flood corridor" },
-  { name: "Trincomalee", lon: 81.23, lat: 8.59, note: "Eastern flood basin" },
+  { name: "Kothmale", lon: 80.6, lat: 7.05, note: "Landslide DS division — Kotmale/Ramboda" },
+  { name: "Ambagamuwa", lon: 80.58, lat: 6.9, note: "Landslide DS division — Hatton/Watawala" },
+  { name: "Walapane", lon: 80.85, lat: 6.95, note: "Landslide DS division — Ohiya border" },
+  { name: "Colombo", lon: 79.88, lat: 6.95, note: "Kelani River flood mouth" },
+  { name: "Kalutara", lon: 79.98, lat: 6.58, note: "Kalu River flood mouth" },
+  { name: "Ratnapura", lon: 80.4, lat: 6.68, note: "Kalu River flood city" },
 ];
