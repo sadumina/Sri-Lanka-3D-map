@@ -470,8 +470,33 @@ export default function SriLankaHazardMap() {
           );
           viewer.scene.primitives.add(tileset);
           googleTilesetRef.current = tileset;
-          viewer.scene.globe.show = false;
-          setStatus("Google Photorealistic 3D active");
+          setStatus("Loading Google Photorealistic 3D…");
+
+          // Creating the tileset can succeed even when tile requests are
+          // then denied (e.g. an API key restricted to a different HTTP
+          // referrer than the one this page loaded from, as happens when
+          // opening the dev server's LAN IP from a phone instead of
+          // localhost). Only hide the fallback globe once a tile actually
+          // loads, and revert to the globe if none do within a few seconds
+          // so the map is never left blank.
+          let tilesLoaded = 0;
+          const fallbackTimer = window.setTimeout(() => {
+            if (tilesLoaded === 0 && !destroyed && googleTilesetRef.current === tileset) {
+              viewer.scene.primitives.remove(tileset);
+              googleTilesetRef.current = null;
+              viewer.scene.globe.show = true;
+              setStatus("Google 3D unavailable on this network; using Cesium fallback");
+            }
+          }, 7000);
+
+          tileset.tileLoad.addEventListener(() => {
+            tilesLoaded += 1;
+            if (tilesLoaded === 1) {
+              window.clearTimeout(fallbackTimer);
+              viewer.scene.globe.show = false;
+              setStatus("Google Photorealistic 3D active");
+            }
+          });
         } catch {
           viewer.scene.globe.show = true;
           setStatus("Google 3D unavailable; using Cesium fallback");
